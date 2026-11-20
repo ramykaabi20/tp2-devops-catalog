@@ -51,8 +51,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: coverage
+      - name: Vérifier la configuration SonarCloud
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          ORG: ${{ vars.SONAR_ORGANIZATION }}
+          KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          ok=true
+          [ -n "$SONAR_TOKEN" ] || { echo "::error::Secret SONAR_TOKEN absent (Settings > Secrets > Actions)"; ok=false; }
+          [ -n "$ORG" ] || { echo "::error::Variable SONAR_ORGANIZATION absente (onglet Variables)"; ok=false; }
+          [ -n "$KEY" ] || { echo "::error::Variable SONAR_PROJECT_KEY absente (onglet Variables)"; ok=false; }
+          echo "::notice::SonarCloud organization='$ORG' projectKey='$KEY' token=$([ -n "$SONAR_TOKEN" ] && echo present || echo absent)"
+          $ok
       - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v4
+        id: scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
@@ -60,6 +73,11 @@ jobs:
           args: >
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+      - name: Diagnostic du scan
+        if: failure() && steps.scan.outcome == 'failure'
+        run: |
+          for f in .scannerwork/report-task.txt; do [ -f "$f" ] && cat "$f"; done
+          echo "::error::Le scanner SonarCloud a échoué : vérifier que l'organisation et la clé du projet existent, que le token est valide et que l'Automatic Analysis est désactivée."
       - name: Quality Gate (bloquant)
         uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
