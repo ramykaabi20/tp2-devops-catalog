@@ -49,7 +49,7 @@ def main(names):
         for name in names:
             if name.startswith("url="):  # capture libre : url=<url>|<nom>
                 url, out = name[4:].rsplit("|", 1)
-                shoot(page, out, url, 10)
+                shoot(page, out, url, 30)
             else:
                 shoot(page, name, *PAGES[name])
         browser.close()

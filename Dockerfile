@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim-bookworm AS build
 WORKDIR /build
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: --prefix=/install -r requirements.lock
 
 FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

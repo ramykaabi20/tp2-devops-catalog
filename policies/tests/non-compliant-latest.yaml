@@ -10,6 +10,7 @@ spec:
   template:
     metadata: { labels: { app: bad-latest } }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: web
           image: nginx:latest

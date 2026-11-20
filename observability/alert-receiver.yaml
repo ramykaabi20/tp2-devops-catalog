@@ -16,8 +16,9 @@ data:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             channel = "PAGE (astreinte)" if self.path == "/pager" else "SLACK #sre-alerts"
             alerts = body.get("alerts", [])
-            if not alerts and "text" in body:  # format Slack
-                print(f"{datetime.now(timezone.utc):%H:%M:%S} [{channel}] {body.get('text')}", flush=True)
+            for att in body.get("attachments", []):  # format Slack
+                print(f"{datetime.now(timezone.utc):%H:%M:%S} [{channel}] {att.get('title')} - "
+                      f"{att.get('text', '').strip()}", flush=True)
             for a in alerts:
                 print(f"{datetime.now(timezone.utc):%H:%M:%S} [{channel}] {a['status'].upper()} "
                       f"{a['labels'].get('alertname')} severity={a['labels'].get('severity')} "
@@ -44,6 +45,7 @@ spec:
     metadata:
       labels: { app: alert-receiver }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: receiver
           image: python:3.12.8-alpine

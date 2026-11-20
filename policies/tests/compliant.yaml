@@ -10,6 +10,7 @@ spec:
   template:
     metadata: { labels: { app: good-nginx } }
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: web
           image: nginx:1.27.3

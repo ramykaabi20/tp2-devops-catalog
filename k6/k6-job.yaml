@@ -15,6 +15,7 @@ spec:
         app: k6
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       containers:
         - name: k6
           image: grafana/k6:0.55.0
