@@ -57,3 +57,28 @@ def main(names):
 
 if __name__ == "__main__":
     main(sys.argv[1:] or ["dashboard"])
+
+
+def argocd(names):
+    """Captures ArgoCD (mot de passe admin initial lu dans le Secret du cluster)."""
+    import base64
+    import subprocess
+
+    raw = subprocess.run(
+        ["kubectl", "-n", "argocd", "get", "secret", "argocd-initial-admin-secret",
+         "-o", "jsonpath={.data.password}"], capture_output=True, text=True, check=True).stdout
+    password = base64.b64decode(raw).decode()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="msedge")
+        page = browser.new_page(viewport={"width": 1600, "height": 1000})
+        page.goto("http://localhost:8081/login")
+        page.fill("input[name=username]", "admin")
+        page.fill("input[name=password]", password)
+        page.click("button[type=submit]")
+        page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
+        for app in names:
+            page.goto(f"http://localhost:8081/applications/argocd/{app}?view=tree&resource=")
+            time.sleep(8)
+            page.screenshot(path=str(OUT / f"argocd-{app}.png"), full_page=True)
+            print("ok", app)
+        browser.close()

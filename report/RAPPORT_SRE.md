@@ -1,8 +1,12 @@
 # Rapport SRE : Continuous Delivery, Quality & Security Gates et observabilité cloud-native
 
-**TP2 DevOps avancé**, microservice `catalog-api`
-Auteur : Ramy Kaabi (`ramykaabi20`), 20 novembre 2026
-Dépôt : https://github.com/ramykaabi20/tp2-devops-catalog
+| | |
+|---|---|
+| **Module** | TP2 DevOps avancé, microservice `catalog-api` |
+| **Classe** | GL5, Groupe 1 |
+| **Membres du groupe** | Rami Kaabi, Mayar Chaabani, Maryem Dammak |
+| **Date** | 20 novembre 2026 |
+| **Dépôt** | https://github.com/ramykaabi20/tp2-devops-catalog |
 
 ---
 
@@ -135,6 +139,10 @@ Le manifeste conforme (`nginx:1.27.3` avec requests et limits) est admis. Les de
 - Le mot de passe Grafana de la démo reste dans les values du lab ; en production, il irait dans un `Secret` géré par External Secrets ou Sealed Secrets.
 
 **Déploiement continu (ArgoCD)** : l'`Application` `argocd/application.yaml` suit `main` / `helm/catalog-api` avec `automated: {prune, selfHeal}`. Chaque commit de la CI qui change `image.tag` est déployé automatiquement. Toute modification manuelle dans le cluster est annulée (*self-heal*). Si un manifeste non conforme arrive par Git, ArgoCD affiche la synchronisation en échec avec le message de Gatekeeper : la politique s'applique aussi au chemin GitOps.
+
+**Scan Trivy de l'image** (0 vulnérabilité CRITICAL, sur l'OS comme sur les paquets Python) :
+
+![Trivy](img/trivy-scan.png)
 
 **Image** : build multi-stage `python:3.12-slim-bookworm`, `apt-get upgrade` pour réduire les CVE, utilisateur non-root (UID 10001), `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`.
 
@@ -391,6 +399,82 @@ Seuils :
 
 ## 8. CI/CD : Quality Gate et GitOps en action
 
-<!-- QUALITY_GATE -->
+### 8.1 La Quality Gate a bloqué `main`, puis une PR non conforme
 
-<!-- ARGOCD -->
+**a) Sur `main`, la gate a révélé de vraies failles.** Lors de la première analyse, la Quality Gate était **rouge** (note de sécurité C sur le nouveau code). Le job `sonar` a échoué (`Quality Gate (bloquant) failure`), et le build, le scan Trivy, le push et le déploiement ont été **sautés**. SonarCloud signalait des vulnérabilités de chaîne d'approvisionnement et de configuration Kubernetes :
+
+| Règle SonarCloud | Problème | Correction appliquée |
+|---|---|---|
+| `githubactions:S7637` | Actions référencées par tag mutable (`@v4`) | Toutes les actions **épinglées par SHA de commit** |
+| `githubactions:S8233/S8264` | Permissions `write` au niveau du workflow | `permissions: {}` global et permissions **par job** (moindre privilège) |
+| `githubactions/docker:S8544` | Dépendances non verrouillées | `requirements*.lock` générés par `pip-compile --generate-hashes`, installation `--require-hashes` |
+| `githubactions/docker:S8541` | `pip install` pouvant exécuter des `setup.py` | `--only-binary :all:` (wheels uniquement) |
+| `kubernetes:S6865` | Jeton de service account monté dans les pods | `automountServiceAccountToken: false` |
+| `kubernetes:S5332` | HTTP en clair | Exception documentée pour le trafic **interne au cluster** uniquement (mTLS par service mesh en production) |
+
+Le verrouillage par SHA a été mis à l'épreuve dès le run suivant : `aquasecurity/trivy-action@0.28.0` référençait en interne `setup-trivy@v0.2.1`, **retiré en amont**, et le job a échoué à la résolution des actions. Trivy est désormais exécuté depuis son image officielle à version fixe (`aquasec/trivy:0.76.2`). Après corrections, la gate est **verte** : couverture 100 %, notes A partout, 0 % de duplication.
+
+Run bloqué par la Quality Gate sur `main` (build, scan et déploiement non exécutés) :
+
+![Run bloqué par la Quality Gate](img/ci-run-gate-blocked.png)
+
+**b) PR non conforme `feat: codes promo` (#1).** La branche `feature/discount-codes` ajoute `app/discounts.py` **sans aucun test** et avec un hachage **MD5**. Les tests passent toujours (couverture globale 89,8 % ≥ 85 %, donc `pytest` ne bloque pas), mais la Quality Gate porte sur le **nouveau code** :
+
+- **Coverage on New Code = 0,0 %** (exigé ≥ 85 %) ;
+- **Security Rating on New Code = D** (exigé A).
+
+![PR bloquée par la Quality Gate](img/pr-github.png)
+
+![Résumé SonarCloud de la PR](img/pr-sonarcloud.png)
+
+Le job `SonarCloud Analysis & Quality Gate` de la PR échoue. Avec une règle de protection de branche *Require status checks to pass* sur ce check, le merge est impossible tant que la gate est rouge.
+
+### 8.2 Pipeline complète verte et déploiement GitOps
+
+Run de référence (commit `eaf2280`) : **Lint & Tests → SonarCloud + Quality Gate → Build + Trivy + Push GHCR → GitOps**, les quatre jobs en succès. Le dernier job a commité `deploy: catalog-api sha-eaf2280 [skip ci]`, qui fixe `image.tag: "sha-eaf2280"`.
+
+![Pipeline complète verte](img/ci-run-success.png)
+
+ArgoCD a détecté ce commit et synchronisé automatiquement le chart : application **Synced / Healthy** sur la révision `04c2456`, 3 pods qui exécutent `ghcr.io/ramykaabi20/catalog-api:sha-eaf2280`, c'est-à-dire exactement l'image testée, analysée et scannée par la CI.
+
+![ArgoCD catalog-api Synced](img/argocd-catalog-api.png)
+
+### 8.3 Gatekeeper protège aussi le chemin GitOps
+
+Une seconde Application ArgoCD (`argocd/gatekeeper-demo.yaml`) synchronise le dossier `policies/tests/` depuis Git. Le manifeste conforme (`good-nginx`) est déployé. Les deux manifestes non conformes sont **refusés par l'API Server** et la synchronisation passe en *Sync failed* :
+
+```
+Deployment/bad-latest:    SyncFailed admission webhook "validation.gatekeeper.sh" denied the request:
+  [disallow-latest-tag] Le conteneur <web> utilise l'image <nginx:latest> : le tag 'latest'
+  (ou l'absence de tag) est interdit, utilisez une version fixe.
+Deployment/bad-resources: SyncFailed admission webhook "validation.gatekeeper.sh" denied the request:
+  [required-cpu-memory] Le conteneur <web> doit définir resources.limits.cpu. (… limits.memory,
+  requests.cpu, requests.memory)
+Deployment/good-nginx:    Synced
+```
+
+![ArgoCD gatekeeper-demo Sync failed](img/argocd-gatekeeper-demo.png)
+
+La défense est donc en profondeur. SonarCloud et Trivy contrôlent le **code et l'image** avant le registre. Gatekeeper contrôle **ce qui entre dans le cluster**, quel que soit le chemin : `kubectl`, Helm ou ArgoCD.
+
+---
+
+## 9. Correspondance avec la grille d'évaluation
+
+| Section (pondération) | Livrables | Où |
+|---|---|---|
+| Code & tests (15 %) | API FastAPI, `/metrics`, `/checkout`, `/flaky`, 33 tests (nominaux, limites, observabilité), **100 %** de couverture, Cobertura | `app/`, `tests/`, §2 |
+| Quality & Security Gates (20 %) | Quality Gate bloquante (couverture ≥ 85 %, hotspots, duplication ≤ 3 %), gate rouge sur `main` corrigée, PR #1 bloquée, 2 ConstraintTemplates Rego, rejets via kubectl **et** ArgoCD | `policies/`, §3, §8 |
+| Pipeline CI/CD & GitOps (20 %) | 4 jobs bloquants, Trivy CRITICAL = échec, push GHCR, bump GitOps automatique, ArgoCD auto-sync / self-heal, secrets dans GitHub, permissions minimales, actions épinglées | `.github/workflows/ci.yml`, `argocd/`, `helm/`, §4, §8 |
+| Observabilité (20 %) | OTel (traces, logs JSON, métriques avec exemplars), scrape des pods annotés, Loki, Tempo, liens trace ↔ logs ↔ métriques démontrés | `app/telemetry.py`, `observability/`, §5 |
+| SRE & charge (25 %) | SLI/SLO, calcul de l'error budget, alertes multi-window multi-burn-rate (14,4 / 6), dashboard RED avec jauge de budget, k6 en 3 scénarios, 2 incidents analysés, post-mortem | `observability/slo-rules.yaml`, `k6/`, §6, §7 |
+
+## 10. Conclusion
+
+La chaîne livre le code de bout en bout **sans intervention manuelle**, avec quatre barrières indépendantes : tests et couverture, analyse statique et Quality Gate, scan de vulnérabilités de l'image, et contrôle d'admission dans Kubernetes. Elles ont toutes été vues **en échec réel** pendant le TP, pas seulement configurées.
+
+Côté SRE, l'exercice a surtout montré trois choses :
+
+1. Les alertes de burn rate multi-window **détectent vite et se résolvent vite** (Warning en 78 s, Critical résolue 4 min après le rollback).
+2. Un SLI mesuré dans l'application **ne voit pas** les requêtes qu'elle ne reçoit jamais (run 1 : 26 req/s visibles sur environ 400).
+3. La capacité (3 processus Python mono-cœur, environ 210 req/s) épuisait le budget de latence **avant même** l'incident applicatif. Les sondes, l'autoscaling et le dimensionnement de l'observabilité font partie de la fiabilité au même titre que le code.

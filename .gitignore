@@ -5,4 +5,6 @@ __pycache__/
 coverage.xml
 .ruff_cache/
 k6/results/*.json
-k6/results/
+report/_preview/
+report/RAPPORT_SRE.html
+k6/results/*.json.tmp

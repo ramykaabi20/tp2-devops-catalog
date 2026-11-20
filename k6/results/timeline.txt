@@ -1,0 +1,6 @@
+18:18:06 UTC - k6 démarré (release saine = révision 4)
+18:23:26 UTC - INCIDENT : déploiement d'une release défectueuse (FLAKY_ERROR_RATE=0.8)
+18:24:09 UTC - release défectueuse en ligne
+18:31:10 UTC - MITIGATION : helm rollback vers la révision 4
+18:31:45 UTC - rollback terminé
+18:31:46 UTC - k6 terminé

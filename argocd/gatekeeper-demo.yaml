@@ -1,0 +1,21 @@
+# Démonstration : un manifeste non conforme livré par GitOps est refusé par Gatekeeper.
+# ArgoCD tente de synchroniser policies/tests/ ; l'API Server rejette les 2 manifestes
+# non conformes (tag latest, resources absentes), la synchronisation passe en échec.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gatekeeper-demo
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ramykaabi20/tp2-devops-catalog.git
+    targetRevision: main
+    path: policies/tests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: catalog
+  syncPolicy:
+    automated: {}
+    retry:
+      limit: 1

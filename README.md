@@ -1,5 +1,7 @@
 # TP2 DevOps avancé : catalog-api
 
+**GL5, Groupe 1** : Rami Kaabi, Mayar Chaabani, Maryem Dammak
+
 Chaîne de livraison continue sécurisée (Quality Gates, OPA Gatekeeper, GitOps) et ingénierie SRE
 (SLI/SLO, Error Budget, burn rate) pour un microservice FastAPI observé avec OpenTelemetry,
 Prometheus, Grafana, Loki et Tempo.
