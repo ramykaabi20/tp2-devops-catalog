@@ -168,7 +168,13 @@ Le manifeste conforme (`nginx:1.27.3` avec requests et limits) est admis. Les de
 
 Vérification réalisée sur le cluster : la trace `58fad190…c2ed47` (`POST /checkout`, 78 ms) retrouvée dans Tempo et ses logs (`checkout_done`, `request`) retrouvés dans Loki avec le même `trace_id`.
 
-<!-- CAPTURES_CORRELATION -->
+**Trace Tempo** d'un `POST /checkout` (255 ms) : span serveur, `checkout.process` → `payment.authorize`. Le bouton *Logs for this trace* ouvre Loki directement :
+
+![Trace Tempo](img/explore-trace.png)
+
+**Logs Loki filtrés sur le même `trace_id`** : la requête et l'événement métier `checkout_done` sont retrouvés à partir de la trace.
+
+![Logs corrélés](img/explore-logs.png)
 
 ---
 
@@ -246,4 +252,145 @@ Les mêmes paires de seuils sont appliquées au SLO de latence (budget 5 %). Tou
 
 Parcours utilisateur : 40 % liste, 25 % fiche produit, 20 % checkout, 15 % `/flaky`, avec un temps de réflexion de 0,5 à 1,5 s. Les **seuils k6 reprennent les SLO** (`server_errors < 0,5 %`, `p(95) < 200 ms`), au global et par scénario.
 
-<!-- RESULTATS -->
+---
+
+## 7. Analyse d'incident simulé (post-mortem)
+
+> Les heures sont en **UTC**. Les captures Grafana affichent l'heure locale (UTC+1).
+
+### 7.1 Run 1 : panne en cascade révélée par le stress test
+
+Configuration initiale : 2 réplicas, `limits.cpu: 500m`, liveness probe par défaut (timeout 1 s, 3 échecs).
+
+À 500 VU, les deux pods saturent leur CPU. `/health` ne répond plus en moins de 1 s, la **liveness probe tue les pods**, et le trafic se reporte sur le pod restant, qui sature à son tour. C'est une **boucle de redémarrages**, et les sondes aggravent la panne au lieu de la contenir. Événements Kubernetes réels :
+
+```
+Normal    Killing     pod/catalog-api-…-ftrxc  Container api failed liveness probe, will be restarted
+Warning   Unhealthy   pod/catalog-api-…-ftrxc  Liveness probe failed: Get "http://10.244.0.30:8000/health":
+                                               context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+Warning   Unhealthy   pod/catalog-api-…-tf485  Readiness probe failed: … context deadline exceeded
+```
+
+**Enseignement SRE : l'angle mort des métriques côté serveur.** Pendant ce run, Prometheus ne voyait qu'environ **26 req/s pour près de 400 req/s envoyées** :
+
+- un pod qui redémarre perd ses compteurs ;
+- un pod saturé ne répond plus au scrape (`context deadline exceeded`) ;
+- les requêtes refusées (connexion impossible) ne sont jamais comptées par l'application.
+
+Le burn rate affichait donc un faux **0,6** en pleine panne. Un SLI de disponibilité mesuré **uniquement dans l'application** sous-estime les pannes franches. En production, il faut le compléter par une mesure au **load balancer / ingress** et par des **sondes synthétiques** (blackbox exporter).
+
+Le run 1 a aussi fait planter l'environnement : le disque du poste était plein. Les mesures de ce run n'ont donc servi qu'au diagnostic, et le run 2 a été rejoué sur une configuration corrigée :
+
+| Action corrective | Avant | Après |
+|---|---|---|
+| Liveness probe | timeout 1 s, 3 échecs | `timeoutSeconds: 5`, `failureThreshold: 6`, `initialDelaySeconds: 10` |
+| Readiness probe | timeout 1 s | `timeoutSeconds: 3` (retire le pod du Service sans le tuer) |
+| Capacité | 2 × 500m CPU | 3 × 1 CPU (`requests.cpu: 250m`) |
+
+### 7.2 Run 2 : release défectueuse sous charge
+
+Scénario : charge k6 complète. Pendant le palier de stress, une release défectueuse est déployée (`FLAKY_ERROR_RATE=0.8`, soit 80 % d'erreurs 503 sur `/flaky`). Elle est ensuite annulée par `helm rollback`.
+
+**Chronologie**
+
+| Heure (UTC) | Événement |
+|---|---|
+| 18:18:06 | Démarrage k6 (release saine, révision 4) |
+| 18:22:46 | Début du stress test 500 VU |
+| 18:23:26 | **Déploiement de la release défectueuse** |
+| 18:24:09 | Release défectueuse en ligne (rolling update terminé) |
+| **18:25:27** | **`CatalogErrorBudgetBurnWarning` FIRING** → Slack (+1 min 18 s) |
+| 18:25:42 | `CatalogLatencyBudgetBurnWarning` FIRING (latence) |
+| 18:29:26 | Spike 0 → 1500 VU en 10 s, maintenu 30 s |
+| 18:29:27 | `CatalogErrorBudgetBurnCritical` PENDING (burn rate 1 h = 14,49 > 14,4) |
+| **18:30:27** | **`CatalogErrorBudgetBurnCritical` FIRING** (+6 min 18 s) |
+| 18:30:42 | **Page reçue** par le récepteur d'astreinte |
+| 18:31:10 → 18:31:45 | **Mitigation** : `helm rollback catalog-api 4` |
+| **18:35:48** | **Alerte Critical RESOLVED** (la fenêtre courte de 5 min repasse sous le seuil) |
+
+Notification réelle reçue par le récepteur d'astreinte :
+
+```
+18:30:42 [PAGE (astreinte)] FIRING CatalogErrorBudgetBurnCritical severity=critical - catalog-api brûle son error budget 14,4x trop vite (2 % du budget en 1 h)
+18:35:48 [PAGE (astreinte)] RESOLVED CatalogErrorBudgetBurnCritical severity=critical - catalog-api brûle son error budget 14,4x trop vite (2 % du budget en 1 h)
+```
+
+**Résultats k6 (côté client, sortie réelle)**
+
+```
+===== Résumé k6 catalog-api =====
+Requêtes : 121097 (165.5 req/s)
+Erreurs serveur (5xx/timeout) : 10.568 %
+Latence p50=523.5 ms  p90=2552.5 ms  p95=3385.8 ms  p99=9997.9 ms  max=12117.2 ms
+VU max : 1500
+Seuils :
+  KO   http_req_duration p(95)<200
+  KO   server_errors{scenario:spike} rate<0.005
+  KO   server_errors rate<0.005
+  KO   http_req_duration{scenario:spike} p(95)<200
+  KO   http_req_duration{scenario:stress} p(95)<200
+  KO   http_req_duration{scenario:ramp_up} p(95)<200
+```
+
+**Résultats par phase (côté serveur, Prometheus)**
+
+| Phase | Débit | Erreurs 5xx | p95 | p99 | Requêtes < 200 ms | Burn rate 5 min / 1 h |
+|---|---|---|---|---|---|---|
+| Ramp-up 0 → 100 VU, release saine | 69,8 req/s | 0,38 % | 199 ms | 322 ms | **95,1 %** | 0,7 / 0,7 |
+| Stress 500 VU, release saine | 207,0 req/s | 1,35 % | 1 937 ms | 3 632 ms | 72,2 % | 1,6 / 1,2 |
+| Stress 500 VU, **release défectueuse** | 233,3 req/s | **12,15 %** | 2 576 ms | 4 860 ms | 27,1 % | **24,3 / 14,3** |
+| Spike 1500 VU, **release défectueuse** | 201,1 req/s | **12,28 %** | 4 559 ms | 4 939 ms | 4,2 % | **24,4 / 14,5** |
+
+**Dashboard Grafana pendant l'incident** (burn rate, RED, logs) :
+
+![Dashboard incident complet](img/incident-dashboard-full.png)
+
+**Alertes Prometheus déclenchées** (Critical + Warning disponibilité, Warning latence) :
+
+![Alertes Prometheus](img/incident-alerts.png)
+
+**Alertmanager** (routage `severity` → récepteurs `pager` et `slack`) :
+
+![Alertmanager](img/incident-alertmanager.png)
+
+### 7.3 Analyse
+
+**1. Ramp-up (100 VU) : les deux SLO tiennent.** Le service est au SLO de latence (95,1 % < 200 ms, p95 = 199 ms) et de disponibilité (0,38 % d'erreurs < 0,5 %). Le burn rate est de 0,7 : sans incident, le budget mensuel serait consommé à 70 %. La différence entre ces 0,38 % et le seuil k6 (KO sur le ramp-up) vient de la latence réseau et de la file d'attente vues par le client, que le serveur ne mesure pas.
+
+**2. Stress (500 VU) : limite de capacité, indépendamment de l'incident.** Avant même la release défectueuse, le débit plafonne vers **210 req/s** (3 processus Python mono-cœur) et le p95 passe de 0,2 à 1,9 s. Les requêtes attendent dans la file d'Uvicorn. Le SLO de latence est violé par **saturation** (U de la méthode USE), sans aucune erreur applicative. Le budget de latence brûle (alerte `CatalogLatencyBudgetBurnWarning`).
+
+**3. Release défectueuse : 12 % d'erreurs, burn rate 24.** 15 % du trafic va sur `/flaky`, à 80 % d'échec, soit 12 % d'erreurs attendues. La mesure donne 12,15 %, donc la métrique est fiable quand les pods restent vivants (contrairement au run 1). Burn rate = 12,15 % / 0,5 % ≈ **24** : à ce rythme, le budget mensuel est épuisé en **30 j / 24 ≈ 30 heures**.
+
+**4. Spike (1500 VU) : le débit n'augmente pas, la latence explose.** Le débit servi baisse même (201 req/s) : la saturation est totale. Le p95 atteint 4,6 s et seulement 4,2 % des requêtes passent sous 200 ms. Côté client, le p99 atteint 10 s, c'est-à-dire des **timeouts** (`timeout: 10s` dans k6) comptés comme erreurs par k6 mais **invisibles côté serveur**. C'est le même angle mort qu'au run 1.
+
+**5. Comportement des alertes multi-window.**
+
+- **Warning (6 h / 30 min, ×6)** : déclenchée **78 s** après la mise en ligne. Les 30 min glissantes dépassent vite 3 % avec 12 % d'erreurs.
+- **Critical (1 h / 5 min, ×14,4)** : déclenchée en **6 min 18 s**. La fenêtre courte (5 min) dépassait le seuil dès 18:25, mais l'alerte attend que **la fenêtre longue de 1 h** dépasse aussi 7,2 %. Le temps de détection théorique pour une alerte de fenêtre W et de seuil B, face à un burn rate b, est W × B / b = 60 min × 14,4 / 24 ≈ **36 min** avec une heure complète d'historique sain. Ici, Prometheus n'avait que 11 min d'historique, d'où la détection plus rapide. C'est le compromis assumé de cette méthode : une **panne totale (100 % d'erreurs, burn rate 200) déclenche la page en ≈ 4,3 min** (60 × 14,4 / 200), alors qu'une dégradation partielle comme celle-ci est d'abord remontée par la Warning, puis par la page si elle persiste assez longtemps pour menacer réellement le budget.
+- **Résolution** : 4 min après le rollback, la condition `and` sur la fenêtre de 5 min fait tomber l'alerte Critical, alors que le burn rate 1 h reste au-dessus de 14,4 pendant presque une heure (voir le graphe). Sans fenêtre courte, l'astreinte serait restée bipée une heure pour un incident déjà résolu.
+
+**6. Error budget consommé.**
+
+- Sur l'ensemble du test (16 min) : **10 865 erreurs sur 119 947 requêtes (9,06 %)**. Sur une fenêtre de 1 h, la disponibilité est de **92,28 %** (jauge Grafana), soit 18 fois le budget de la fenêtre : la jauge « budget restant » descend à −1444 %.
+- Rapporté au **budget mensuel** (SLO 99,5 % sur 30 j) au débit moyen du test (125 req/s) : 125 × 2 592 000 × 0,005 = **1 620 000 erreurs autorisées par mois**. L'incident en a consommé 10 865, soit **0,67 % du budget mensuel** en 7 minutes. S'il avait duré **1 heure** au même rythme, il aurait consommé environ 5 % du budget. À burn rate 24 non corrigé, le budget mensuel entier part en environ 30 heures.
+
+**7. L'observabilité doit tenir la charge.** Pendant le spike, **Tempo a redémarré 5 fois** (limite mémoire de 512 Mi atteinte) et a perdu des traces, faute de stockage persistant. La plateforme d'observabilité doit être dimensionnée pour le pic, et l'échantillonnage des traces (*tail sampling* dans le Collector : garder 100 % des erreurs et des requêtes lentes, 10 % du reste) réduit fortement ce risque.
+
+### 7.4 Actions correctives
+
+| # | Action | Type | Priorité |
+|---|---|---|---|
+| 1 | Analyse canary (Argo Rollouts) avec rollback automatique si le burn rate 5 min > 14,4 | Prévention | P1 |
+| 2 | Autoscaling horizontal (HPA sur CPU ou RPS) et `uvicorn --workers` avec `prometheus_client` en mode multiprocess | Capacité | P1 |
+| 3 | SLI mesuré aussi à l'ingress et par sondes synthétiques (angle mort côté serveur) | Détection | P1 |
+| 4 | Sondes : liveness réservée aux blocages (endpoint léger), readiness pour la saturation | Résilience | Fait |
+| 5 | *Tail sampling* OTel, Tempo avec stockage objet et plus de mémoire | Observabilité | P2 |
+| 6 | Rate limiting / load shedding (réponse 429 rapide plutôt que 10 s d'attente) | Résilience | P2 |
+
+---
+
+## 8. CI/CD : Quality Gate et GitOps en action
+
+<!-- QUALITY_GATE -->
+
+<!-- ARGOCD -->

@@ -112,23 +112,15 @@ jobs:
           context: .
           load: true
           tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+      # Trivy via son image officielle (version fixe) : l'action composite
+      # trivy-action@v0.28.0 référence setup-trivy@v0.2.1, retiré en amont.
       - name: Trivy scan (CRITICAL = échec)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock             aquasec/trivy:0.76.2 image --scanners vuln --severity CRITICAL             --ignore-unfixed --exit-code 1 --no-progress "${IMAGE}:${{ steps.meta.outputs.tag }}"
       - name: Trivy rapport SARIF (onglet Security)
         if: always()
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-          severity: CRITICAL,HIGH
-          format: sarif
-          output: trivy.sarif
-          exit-code: "0"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out"             aquasec/trivy:0.76.2 image --scanners vuln --severity CRITICAL,HIGH             --format sarif --output /out/trivy.sarif --no-progress "${IMAGE}:${{ steps.meta.outputs.tag }}"
       - uses: github/codeql-action/upload-sarif@d2aacf54c2fbc910db8d7ec338fdb54ea48c692d # v3
         if: always()
         with:
