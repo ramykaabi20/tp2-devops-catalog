@@ -1,0 +1,36 @@
+# Lance le test k6 dans le cluster (évite le goulot d'un port-forward sous 1500 VU).
+#   kubectl -n catalog create configmap k6-script --from-file=k6/load-test.js --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f k6/k6-job.yaml && kubectl -n catalog logs -f job/k6-load-test
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load-test
+  namespace: catalog
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: k6
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.55.0
+          args: ["run", "/scripts/load-test.js"]
+          env:
+            - name: BASE_URL
+              value: http://catalog-api.catalog.svc
+            - name: SCALE
+              value: "1"
+          resources:
+            requests: { cpu: "1", memory: 512Mi }
+            limits: { cpu: "2", memory: 1536Mi }
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: k6-script

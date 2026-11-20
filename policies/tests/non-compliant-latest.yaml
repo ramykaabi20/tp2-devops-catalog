@@ -1,0 +1,18 @@
+# Doit être REJETÉ : tag latest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-latest
+  namespace: catalog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bad-latest } }
+  template:
+    metadata: { labels: { app: bad-latest } }
+    spec:
+      containers:
+        - name: web
+          image: nginx:latest
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 128Mi }

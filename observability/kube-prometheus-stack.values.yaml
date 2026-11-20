@@ -1,0 +1,138 @@
+# Prometheus + Alertmanager + Grafana, réglés pour un Minikube à 5 Go.
+defaultRules:
+  create: false
+nodeExporter:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+kubeEtcd: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeProxy: { enabled: false }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    enableFeatures: ["exemplar-storage"]
+    # Les règles SLO (PrometheusRule) sont prises dans tous les namespaces.
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 200m, memory: 400Mi }
+      limits: { memory: 1Gi }
+    # Découverte automatique des pods annotés prometheus.io/scrape=true.
+    additionalScrapeConfigs:
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: app
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 20m, memory: 32Mi }
+      limits: { memory: 128Mi }
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      group_by: [alertname, slo]
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      routes:
+        - receiver: pager
+          matchers: ['severity="critical"']
+        - receiver: slack
+          matchers: ['severity="warning"']
+    receivers:
+      - name: "null"
+      # Page (astreinte). En production : PagerDuty / Opsgenie.
+      - name: pager
+        webhook_configs:
+          - url: http://alert-receiver.observability.svc:8080/pager
+            send_resolved: true
+      # Slack : remplacer api_url par le webhook réel du canal #sre-alerts.
+      - name: slack
+        slack_configs:
+          - api_url: http://alert-receiver.observability.svc:8080/slack
+            channel: "#sre-alerts"
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }} {{ end }}'
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+grafana:
+  adminPassword: tp2-admin
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      url: http://loki.observability.svc:3100
+      jsonData:
+        derivedFields:
+          # Lien Logs -> Traces : le trace_id (structured metadata OTLP) ouvre Tempo.
+          - name: trace_id
+            matcherType: label
+            matcherRegex: trace_id
+            datasourceUid: tempo
+            url: "$${__value.raw}"
+            urlDisplayLabel: Voir la trace
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      url: http://tempo.observability.svc:3200
+      jsonData:
+        # Lien Traces -> Logs : depuis un span, requête Loki filtrée sur son trace_id.
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -5m
+          spanEndTimeShift: 5m
+          filterByTraceID: true
+          customQuery: true
+          query: '{service_name="catalog-api"} | trace_id="$${__trace.traceId}"'
+        tracesToMetrics:
+          datasourceUid: prometheus
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true

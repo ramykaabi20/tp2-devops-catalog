@@ -1,0 +1,18 @@
+# Doit être ACCEPTÉ.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: good-nginx
+  namespace: catalog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: good-nginx } }
+  template:
+    metadata: { labels: { app: good-nginx } }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.3
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 128Mi }

@@ -1,0 +1,23 @@
+dex: { enabled: false }
+notifications: { enabled: false }
+applicationSet: { replicas: 0 }
+configs:
+  params:
+    server.insecure: true
+    timeout.reconciliation: 60s
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+server:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+redis:
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }

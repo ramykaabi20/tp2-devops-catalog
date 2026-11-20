@@ -1,0 +1,15 @@
+# Doit être REJETÉ : pas de requests/limits.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-resources
+  namespace: catalog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bad-resources } }
+  template:
+    metadata: { labels: { app: bad-resources } }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.3

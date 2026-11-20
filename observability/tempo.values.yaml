@@ -1,0 +1,12 @@
+tempo:
+  retention: 48h
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  receivers:
+    otlp:
+      protocols:
+        grpc: { endpoint: "0.0.0.0:4317" }
+        http: { endpoint: "0.0.0.0:4318" }
+persistence:
+  enabled: false

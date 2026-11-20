@@ -1,0 +1,110 @@
+# SLI / SLO / Error Budget et alertes multi-window multi-burn-rate (Google SRE Workbook).
+#
+#   Availability SLO : 99,5 % de requêtes avec status < 500  -> budget d'erreur = 0,5 %
+#   Latency SLO      : 95 % des requêtes en moins de 200 ms   -> budget = 5 % de requêtes lentes
+#   Fenêtre SLO      : 30 jours glissants
+#
+#   Burn rate = taux d'erreur observé / budget. Un burn rate de 1 consomme exactement
+#   le budget en 30 j. Budget consommé sur une fenêtre W = burn_rate * W / 30 j :
+#     Critical (page)    : 2 % du budget en 1 h -> 0,02 * 720 h / 1 h = 14,4
+#     Warning  (Slack)   : 5 % du budget en 6 h -> 0,05 * 720 h / 6 h = 6
+#   Chaque alerte exige aussi une fenêtre courte (5 min / 30 min = 1/12 de la longue),
+#   pour se déclencher vite et se résoudre vite une fois l'incident terminé.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: catalog-api-slo
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: catalog-api-sli
+      interval: 15s
+      rules:
+        # --- Disponibilité : part de requêtes en erreur 5xx ------------------
+        - record: catalog:sli_errors:ratio_rate5m
+          expr: sum(rate(http_requests_total{app="catalog-api",status=~"5.."}[5m])) / sum(rate(http_requests_total{app="catalog-api"}[5m]))
+        - record: catalog:sli_errors:ratio_rate30m
+          expr: sum(rate(http_requests_total{app="catalog-api",status=~"5.."}[30m])) / sum(rate(http_requests_total{app="catalog-api"}[30m]))
+        - record: catalog:sli_errors:ratio_rate1h
+          expr: sum(rate(http_requests_total{app="catalog-api",status=~"5.."}[1h])) / sum(rate(http_requests_total{app="catalog-api"}[1h]))
+        - record: catalog:sli_errors:ratio_rate6h
+          expr: sum(rate(http_requests_total{app="catalog-api",status=~"5.."}[6h])) / sum(rate(http_requests_total{app="catalog-api"}[6h]))
+        - record: catalog:sli_errors:ratio_rate30d
+          expr: sum(increase(http_requests_total{app="catalog-api",status=~"5.."}[30d])) / sum(increase(http_requests_total{app="catalog-api"}[30d]))
+
+        # --- Latence : part de requêtes plus lentes que 200 ms ---------------
+        - record: catalog:sli_slow:ratio_rate5m
+          expr: 1 - sum(rate(http_request_duration_seconds_bucket{app="catalog-api",le="0.2"}[5m])) / sum(rate(http_request_duration_seconds_count{app="catalog-api"}[5m]))
+        - record: catalog:sli_slow:ratio_rate30m
+          expr: 1 - sum(rate(http_request_duration_seconds_bucket{app="catalog-api",le="0.2"}[30m])) / sum(rate(http_request_duration_seconds_count{app="catalog-api"}[30m]))
+        - record: catalog:sli_slow:ratio_rate1h
+          expr: 1 - sum(rate(http_request_duration_seconds_bucket{app="catalog-api",le="0.2"}[1h])) / sum(rate(http_request_duration_seconds_count{app="catalog-api"}[1h]))
+        - record: catalog:sli_slow:ratio_rate6h
+          expr: 1 - sum(rate(http_request_duration_seconds_bucket{app="catalog-api",le="0.2"}[6h])) / sum(rate(http_request_duration_seconds_count{app="catalog-api"}[6h]))
+
+        # --- Error budget restant sur la fenêtre SLO (1 = intact, <0 = épuisé) ---
+        - record: catalog:error_budget_remaining:ratio30d
+          expr: 1 - (catalog:sli_errors:ratio_rate30d / 0.005)
+
+        # --- Burn rates (affichés dans Grafana) ------------------------------
+        - record: catalog:burn_rate:1h
+          expr: catalog:sli_errors:ratio_rate1h / 0.005
+        - record: catalog:burn_rate:6h
+          expr: catalog:sli_errors:ratio_rate6h / 0.005
+        - record: catalog:burn_rate:5m
+          expr: catalog:sli_errors:ratio_rate5m / 0.005
+        - record: catalog:burn_rate:30m
+          expr: catalog:sli_errors:ratio_rate30m / 0.005
+
+    - name: catalog-api-burn-rate-alerts
+      rules:
+        - alert: CatalogErrorBudgetBurnCritical
+          expr: |
+            catalog:sli_errors:ratio_rate1h > (14.4 * 0.005)
+            and
+            catalog:sli_errors:ratio_rate5m > (14.4 * 0.005)
+          for: 1m
+          labels:
+            severity: critical
+            slo: availability
+          annotations:
+            summary: "catalog-api brûle son error budget 14,4x trop vite (2 % du budget en 1 h)"
+            description: "Taux d'erreur 1 h = {{ $value | humanizePercentage }} (seuil 7,2 %). Au rythme actuel, le budget mensuel sera épuisé en environ 2 jours."
+            runbook_url: https://example.com/runbooks/catalog-api#burn-rate
+        - alert: CatalogErrorBudgetBurnWarning
+          expr: |
+            catalog:sli_errors:ratio_rate6h > (6 * 0.005)
+            and
+            catalog:sli_errors:ratio_rate30m > (6 * 0.005)
+          for: 2m
+          labels:
+            severity: warning
+            slo: availability
+          annotations:
+            summary: "catalog-api brûle son error budget 6x trop vite (5 % du budget en 6 h)"
+            description: "Taux d'erreur 6 h = {{ $value | humanizePercentage }} (seuil 3 %). Au rythme actuel, le budget mensuel sera épuisé en 5 jours."
+        # Bonus : mêmes seuils appliqués au SLO de latence (budget = 5 %).
+        - alert: CatalogLatencyBudgetBurnCritical
+          expr: |
+            catalog:sli_slow:ratio_rate1h > (14.4 * 0.05)
+            and
+            catalog:sli_slow:ratio_rate5m > (14.4 * 0.05)
+          for: 1m
+          labels:
+            severity: critical
+            slo: latency
+          annotations:
+            summary: "catalog-api : plus de 72 % des requêtes dépassent 200 ms"
+        - alert: CatalogLatencyBudgetBurnWarning
+          expr: |
+            catalog:sli_slow:ratio_rate6h > (6 * 0.05)
+            and
+            catalog:sli_slow:ratio_rate30m > (6 * 0.05)
+          for: 2m
+          labels:
+            severity: warning
+            slo: latency
+          annotations:
+            summary: "catalog-api : plus de 30 % des requêtes dépassent 200 ms"

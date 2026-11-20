@@ -1,0 +1,12 @@
+.venv
+.git
+tests
+k6
+helm
+policies
+observability
+argocd
+report
+*.xml
+.pytest_cache
+__pycache__

@@ -1,0 +1,635 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-sre-dashboard
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  catalog-sre.json: |
+    {
+      "uid": "catalog-sre",
+      "title": "catalog-api - SRE (RED & Error Budget)",
+      "tags": [
+        "sre",
+        "slo",
+        "red"
+      ],
+      "timezone": "browser",
+      "refresh": "10s",
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "schemaVersion": 39,
+      "templating": {
+        "list": [
+          {
+            "name": "window",
+            "label": "Fenêtre SLO",
+            "type": "custom",
+            "query": "1h,6h,24h,30d",
+            "current": {
+              "text": "30d",
+              "value": "30d"
+            },
+            "options": [
+              {
+                "text": "1h",
+                "value": "1h",
+                "selected": false
+              },
+              {
+                "text": "6h",
+                "value": "6h",
+                "selected": false
+              },
+              {
+                "text": "24h",
+                "value": "24h",
+                "selected": false
+              },
+              {
+                "text": "30d",
+                "value": "30d",
+                "selected": true
+              }
+            ]
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "SLO & Error Budget",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "title": "Error Budget restant (SLO dispo 99,5 % / $window)",
+          "type": "gauge",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 6,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - ((sum(increase(http_requests_total{app=\"catalog-api\",status=~\"5..\"}[$window])) / sum(increase(http_requests_total{app=\"catalog-api\"}[$window]))) / 0.005)",
+              "legendFormat": "budget",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": -1,
+              "max": 1,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showThresholdMarkers": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Disponibilité (SLI) sur $window",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 1,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "1 - sum(increase(http_requests_total{app=\"catalog-api\",status=~\"5..\"}[$window])) / sum(increase(http_requests_total{app=\"catalog-api\"}[$window]))",
+              "legendFormat": "SLI",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 3,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.995
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Latence : part < 200 ms sur $window",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 5,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(http_request_duration_seconds_bucket{app=\"catalog-api\",le=\"0.2\"}[$window])) / sum(increase(http_request_duration_seconds_count{app=\"catalog-api\"}[$window]))",
+              "legendFormat": "SLI",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.95
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Burn Rate (disponibilité)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 10,
+            "y": 1,
+            "w": 14,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "catalog:burn_rate:5m",
+              "legendFormat": "5 min",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "catalog:burn_rate:1h",
+              "legendFormat": "1 h",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "C",
+              "expr": "catalog:burn_rate:30m",
+              "legendFormat": "30 min",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "D",
+              "expr": "catalog:burn_rate:6h",
+              "legendFormat": "6 h",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "x",
+              "min": 0,
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                },
+                "lineWidth": 2
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "transparent",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 6
+                  },
+                  {
+                    "color": "red",
+                    "value": 14.4
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "description": "Seuils : 6 (warning, 5 % du budget en 6 h) et 14,4 (critical, 2 % du budget en 1 h)."
+        },
+        {
+          "id": 6,
+          "type": "row",
+          "title": "RED : Rate / Errors / Duration",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "title": "Rate : requêtes par seconde (RPS)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 10,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(http_requests_total{app=\"catalog-api\"}[1m]))",
+              "legendFormat": "total",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (route) (rate(http_requests_total{app=\"catalog-api\"}[1m]))",
+              "legendFormat": "{{route}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "title": "Errors : erreurs 5xx par seconde",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 10,
+            "w": 6,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (route, status) (rate(http_requests_total{app=\"catalog-api\",status=~\"5..\"}[1m]))",
+              "legendFormat": "{{route}} {{status}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "title": "Errors : % d'erreur global",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 10,
+            "w": 6,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(http_requests_total{app=\"catalog-api\",status=~\"5..\"}[1m])) / sum(rate(http_requests_total{app=\"catalog-api\"}[1m]))",
+              "legendFormat": "erreurs",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.005
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.072
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          }
+        },
+        {
+          "id": 10,
+          "title": "Duration : latence p50 / p90 / p95 / p99",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 18,
+            "w": 16,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{app=\"catalog-api\"}[1m])))",
+              "legendFormat": "p50",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.9, sum by (le) (rate(http_request_duration_seconds_bucket{app=\"catalog-api\"}[1m])))",
+              "legendFormat": "p90",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "C",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{app=\"catalog-api\"}[1m])))",
+              "legendFormat": "p95",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "refId": "D",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{app=\"catalog-api\"}[1m])))",
+              "legendFormat": "p99",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "transparent",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.2
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 11,
+          "title": "Duration : p95 par route",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 18,
+            "w": 8,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{app=\"catalog-api\"}[1m])))",
+              "legendFormat": "{{route}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 12,
+          "type": "row",
+          "title": "Corrélation logs / traces",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 13,
+          "title": "Logs catalog-api (cliquer sur trace_id -> Tempo)",
+          "type": "logs",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 28,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "queryType": "range",
+              "expr": "{service_name=\"catalog-api\"}"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "enableLogDetails": true,
+            "sortOrder": "Descending"
+          }
+        }
+      ]
+    }

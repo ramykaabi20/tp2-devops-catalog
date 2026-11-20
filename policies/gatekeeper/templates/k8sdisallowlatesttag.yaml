@@ -1,0 +1,50 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sdisallowlatesttag
+  annotations:
+    description: Interdit le tag "latest" (explicite ou implicite) sur les images des conteneurs.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sDisallowLatestTag
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sdisallowlatesttag
+
+        import future.keywords.contains
+        import future.keywords.if
+        import future.keywords.in
+
+        # Les conteneurs d'un Pod ou d'un workload (Deployment, StatefulSet, Job...).
+        pod_spec := input.review.object.spec if {
+          input.review.kind.kind == "Pod"
+        } else := input.review.object.spec.template.spec
+
+        containers contains c if { some c in pod_spec.containers }
+        containers contains c if { some c in pod_spec.initContainers }
+        containers contains c if { some c in pod_spec.ephemeralContainers }
+
+        # Partie après le dernier "/", pour ne pas confondre registry:port et tag.
+        image_name(image) := name if {
+          parts := split(image, "/")
+          name := parts[count(parts) - 1]
+        }
+
+        uses_latest(image) if {
+          not contains(image, "@")
+          not contains(image_name(image), ":")
+        }
+
+        uses_latest(image) if {
+          not contains(image, "@")
+          endswith(image_name(image), ":latest")
+        }
+
+        violation contains {"msg": msg} if {
+          some c in containers
+          uses_latest(c.image)
+          msg := sprintf("Le conteneur <%v> utilise l'image <%v> : le tag 'latest' (ou l'absence de tag) est interdit, utilisez une version fixe.", [c.name, c.image])
+        }

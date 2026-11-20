@@ -1,0 +1,29 @@
+# Application ArgoCD : synchronise le chart Helm depuis Git (GitOps).
+# La CI met à jour helm/catalog-api/values.yaml (image.tag = sha-xxxxxxx) ;
+# ArgoCD détecte le commit et déploie automatiquement.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: catalog-api
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ramykaabi20/tp2-devops-catalog.git
+    targetRevision: main
+    path: helm/catalog-api
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: catalog
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff: { duration: 10s, factor: 2, maxDuration: 2m }

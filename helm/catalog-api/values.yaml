@@ -1,0 +1,29 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/ramykaabi20/catalog-api
+  # Jamais "latest" : la CI met ici le SHA du commit (règle Gatekeeper).
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+
+env:
+  DEPLOY_ENV: dev
+  LOG_LEVEL: INFO
+  CHECKOUT_MIN_DELAY_MS: "30"
+  CHECKOUT_MAX_DELAY_MS: "220"
+  FLAKY_ERROR_RATE: "0.02"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-opentelemetry-collector.observability.svc:4318

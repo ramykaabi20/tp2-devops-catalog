@@ -1,0 +1,5 @@
+# Surcharge pour Minikube : image construite localement (minikube image build).
+image:
+  repository: catalog-api
+  tag: "1.0.1"
+  pullPolicy: Never

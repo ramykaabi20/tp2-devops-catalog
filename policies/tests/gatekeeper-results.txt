@@ -1,0 +1,9 @@
+### kubectl apply -f policies/tests/non-compliant-latest.yaml
+Error from server (Forbidden): error when creating "policies/tests/non-compliant-latest.yaml": admission webhook "validation.gatekeeper.sh" denied the request: [disallow-latest-tag] Le conteneur <web> utilise l'image <nginx:latest> : le tag 'latest' (ou l'absence de tag) est interdit, utilisez une version fixe.
+### kubectl apply -f policies/tests/non-compliant-no-resources.yaml
+Error from server (Forbidden): error when creating "policies/tests/non-compliant-no-resources.yaml": admission webhook "validation.gatekeeper.sh" denied the request: [required-cpu-memory] Le conteneur <web> doit définir resources.limits.cpu.
+[required-cpu-memory] Le conteneur <web> doit définir resources.limits.memory.
+[required-cpu-memory] Le conteneur <web> doit définir resources.requests.cpu.
+[required-cpu-memory] Le conteneur <web> doit définir resources.requests.memory.
+### kubectl apply -f policies/tests/compliant.yaml
+deployment.apps/good-nginx created
