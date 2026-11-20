@@ -78,6 +78,8 @@ jobs:
           args: >
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.exclusions=scripts/**
+            -Dsonar.python.coverage.reportPaths=coverage.xml
       - name: Diagnostic du scan
         if: failure() && steps.scan.outcome == 'failure'
         run: |
