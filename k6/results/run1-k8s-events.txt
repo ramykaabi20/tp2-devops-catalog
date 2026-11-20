@@ -1,6 +1,0 @@
-75s         Normal    Killing             pod/catalog-api-dc8bbb54c-ftrxc     Container api failed liveness probe, will be restarted
-75s         Warning   Unhealthy           pod/catalog-api-dc8bbb54c-ftrxc     Liveness probe failed: Get "http://10.244.0.30:8000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-71s         Warning   Unhealthy           pod/catalog-api-dc8bbb54c-tf485     Readiness probe failed: Get "http://10.244.0.29:8000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-66s         Warning   Unhealthy           pod/catalog-api-dc8bbb54c-ftrxc     Readiness probe failed: Get "http://10.244.0.30:8000/health": dial tcp 10.244.0.30:8000: connect: connection refused
-66s         Warning   Unhealthy           pod/catalog-api-dc8bbb54c-ftrxc     Liveness probe failed: Get "http://10.244.0.30:8000/health": dial tcp 10.244.0.30:8000: connect: connection refused
-50s         Warning   Unhealthy           pod/catalog-api-dc8bbb54c-ftrxc     Readiness probe failed: Get "http://10.244.0.30:8000/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)

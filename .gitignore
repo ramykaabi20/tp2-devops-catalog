@@ -5,3 +5,4 @@ __pycache__/
 coverage.xml
 .ruff_cache/
 k6/results/*.json
+k6/results/
