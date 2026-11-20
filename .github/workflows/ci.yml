@@ -30,7 +30,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.lock
       - name: Dépendances verrouillées (hashes, wheels uniquement)
-        run: pip install --require-hashes --only-binary :all: -r requirements-dev.lock
+        run: pip install --require-hashes --only-binary ":all:" -r requirements-dev.lock
       - name: Lint (ruff)
         run: |
           ruff check .
