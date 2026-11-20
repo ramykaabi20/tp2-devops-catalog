@@ -3,7 +3,7 @@ replicaCount: 3
 image:
   repository: ghcr.io/ramykaabi20/catalog-api
   # Jamais "latest" : la CI met ici le SHA du commit (règle Gatekeeper).
-  tag: "1.0.0"
+  tag: "sha-eaf2280"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
